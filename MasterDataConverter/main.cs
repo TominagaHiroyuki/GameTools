@@ -51,7 +51,7 @@ class DataConverter
         sw.Start();
 
         var keyPath = parsedArgs.KeyPath;
-        var spreadSheetId = "1FJuiTJYUDYMUe2qI_JqZQGzqI_Z24kQJW_B7gWjwv24";//parsedArgs.SpreadSheetId;
+        var spreadSheetId = parsedArgs.SpreadSheetId;
         if(string.IsNullOrEmpty(spreadSheetId))
         {
             Console.WriteLine("Error: SpreadSheetId is required");
