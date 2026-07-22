@@ -9,8 +9,6 @@ using Newtonsoft.Json;
 
 namespace MasterDataConverter;
 
-//1FJuiTJYUDYMUe2qI_JqZQGzqI_Z24kQJW_B7gWjwv24
-
 /// <summary>
 /// Main Class
 /// </summary>
