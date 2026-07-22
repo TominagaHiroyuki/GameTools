@@ -9,6 +9,7 @@ using Google.Apis.Auth.OAuth2;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System;
 
 namespace MasterDataConverter;
 
@@ -155,7 +156,7 @@ public static class GoogleSpreadSheetService
     /// </summary>
     /// <param name="credential"></param>
     /// <param name="spreadSheetId"></param>
-    public static async Task<Dictionary<string, List<Dictionary<string, object>>>> GetSpreadSheetDataAsync(ICredential credential, string spreadSheetId, Dictionary<string, Dictionary<string, object>>? referenceData = null)
+    public static async Task<Dictionary<string, List<Dictionary<string, object>>>> GetSpreadSheetDataAsync(ICredential credential, string spreadSheetId, Dictionary<string, Dictionary<string, object>>? referenceData = null, Version? targetVersion = null)
     {
         if (credential == null)
         {
@@ -183,6 +184,8 @@ public static class GoogleSpreadSheetService
                 continue;
             }
 
+           
+
             var datas = new List<Dictionary<string, object>>();
             var keys = values[(int)RowKind.ColumnName]
                         .Where(x => !string.IsNullOrEmpty(x.ToString()))
@@ -206,6 +209,18 @@ public static class GoogleSpreadSheetService
                     if(key != null && key.Contains('$'))
                     {
                         continue; // 対象外のキーの場合は無視
+                    }
+
+                    // 有効バージョンがある場合
+                    if(values[(int)RowKind.EnableVersion].Count > i && targetVersion != null)
+                    {
+                        if(Version.TryParse(values[(int)RowKind.EnableVersion][i] as string ?? "1.0.0", out var columnVersion))
+                        {
+                            if(targetVersion != null && columnVersion > targetVersion)
+                            {
+                                continue;
+                            }
+                        }
                     }
 
                     if (key != null && key.Contains('#'))
@@ -282,9 +297,9 @@ public static class GoogleSpreadSheetService
         }
 
         /*
-        種族#Race human devil beast god other
+        種族#Race human devil other
         ID 0 1 2 3 4
-        表示名 人族 魔族 獣族 神族 その他
+        表示名 人族 魔族 その他
         ↓のような構造にする
         {
             "Race":{
@@ -389,7 +404,7 @@ public static class GoogleSpreadSheetService
         return result;
     }
 
-    public static async Task<Dictionary<string, List<MasterSchemaEntity>>> GetMasterSchemaAsync(ICredential credential, string spreadSheetId)
+    public static async Task<Dictionary<string, List<MasterSchemaEntity>>> GetMasterSchemaAsync(ICredential credential, string spreadSheetId, Version? targetVersion = null)
     {
         if (credential == null)
         {
@@ -408,6 +423,7 @@ public static class GoogleSpreadSheetService
         foreach (var valueRange in response.ValueRanges)
         {
             var sheetName = valueRange.Range.Split("!")[0];
+            Console.WriteLine($"  SheetName: {sheetName}");
             var values = valueRange.Values;
             // データがない or Key情報しかないシートは無視
             if (values == null || values.Count < (int)RowKind.Max)
@@ -429,19 +445,25 @@ public static class GoogleSpreadSheetService
                     ValueType = values[(int)RowKind.ValueType][i] as string ?? string.Empty,
                 };
 
+                // 有効バージョンがある場合
+                if(values[(int)RowKind.EnableVersion].Count > i)
+                {
+                    if(Version.TryParse(values[(int)RowKind.EnableVersion][i] as string ?? "1.0.0", out var columnVersion))
+                    {
+                        if(targetVersion != null && columnVersion > targetVersion)
+                        {
+                            continue;
+                        }
+                        schema.Version = columnVersion.ToString();
+                    }
+                }
+
                 var name = values[(int)RowKind.ColumnName][i] as string ?? string.Empty;
                 if(name.Contains('#'))
                 {
                     name = name.Split('#')[0];
                 }
                 schema.ColumnName = name;
-
-                var version = "1.0.0";
-                if(values[(int)RowKind.EnableVersion].Count > i)
-                {
-                    version = values[(int)RowKind.EnableVersion][i] as string ?? "1.0.0";
-                }
-                schema.Version = version;
 
                 schemas.Add(schema);
             }

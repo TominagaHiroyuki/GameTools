@@ -1,5 +1,5 @@
 ﻿/**
-* @file Program.cs
+* @file main.cs
 * @brief MasterDataConverter
 */
 
@@ -9,14 +9,13 @@ using Newtonsoft.Json;
 
 namespace MasterDataConverter;
 
+//1FJuiTJYUDYMUe2qI_JqZQGzqI_Z24kQJW_B7gWjwv24
+
 /// <summary>
 /// Main Class
 /// </summary>
-class Program
+class DataConverter
 {
-    // 引数でもらう
-    readonly static string DefaultSpreadSheetId = "xxxxx-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx";
-
     public enum ArgsKind
     {
         SpreadSheetId,  // スプレッドシートID
@@ -24,6 +23,7 @@ class Program
         KeyPath,        // キーのパス
         ExportType,     // 出力タイプ(yaml, db, json)
         Mode,           // モード(Data, Schema, Enum, All)
+        Version,        // バージョン
         Help,           // ヘルプ
     }
 
@@ -36,50 +36,43 @@ class Program
         All = Data | Schema | Enum,
     }
 
+    public struct ConvertOptions
+    {
+        public string SpreadSheetId { get; set; }
+        public string OutputDir { get; set; }
+        public string KeyPath { get; set; }
+        public string ExportType { get; set; }
+        public ModeKind Mode { get; set; }
+        public string Version { get; set; }
+    }
+
     static async Task<int> Main(string[] args)
     {
         var parsedArgs = ParseArgs(args);
         var sw = new Stopwatch();
         sw.Start();
 
-        Console.WriteLine("MasterDataConverter");
-        Console.WriteLine();
-        Console.WriteLine("Start");
-
-        var mode = ModeKind.All;
-        if(parsedArgs.TryGetValue(ArgsKind.Mode, out var modeValue))
+        var keyPath = parsedArgs.KeyPath;
+        var spreadSheetId = "1FJuiTJYUDYMUe2qI_JqZQGzqI_Z24kQJW_B7gWjwv24";//parsedArgs.SpreadSheetId;
+        if(string.IsNullOrEmpty(spreadSheetId))
         {
-            if(Enum.TryParse(modeValue, out ModeKind modeKind))
-            {
-                mode = modeKind;
-            }
+            Console.WriteLine("Error: SpreadSheetId is required");
+            Environment.Exit(1);
         }
 
-        Console.WriteLine($"  Mode: {mode}");
-
-        var outputDir = "../../../output";
-        if(parsedArgs.TryGetValue(ArgsKind.OutputDir, out var outputDirValue))
-        {
-            outputDir = outputDirValue;
-        }
+        var outputDir = parsedArgs.OutputDir;
         if(Directory.Exists(outputDir))
         {
             Directory.Delete(outputDir, true);
         }
         Directory.CreateDirectory(outputDir);
 
-        var keyPath = "../../../key.json";
-        if(parsedArgs.TryGetValue(ArgsKind.KeyPath, out var keyPathValue))
-        {
-            keyPath = keyPathValue;
-        }
-        var spreadSheetId = DefaultSpreadSheetId;
-        if(parsedArgs.TryGetValue(ArgsKind.SpreadSheetId, out var spreadSheetIdValue))
-        {
-            spreadSheetId = spreadSheetIdValue;
-        }
+        Console.WriteLine("MasterDataConverter");
+        Console.WriteLine();
+        Console.WriteLine("Start");
 
-        
+        var mode = parsedArgs.Mode;
+        Console.WriteLine($"  Mode: {mode}");
 
         var credential = GoogleAuthService.GetCredential(keyPath, GoogleSpreadSheetService.Scope);
         var masterManifest = await GoogleSpreadSheetService.GetMasterManifestAsync(credential, spreadSheetId);
@@ -88,6 +81,7 @@ class Program
         var sheetDatas = new Dictionary<string, List<Dictionary<string, object>>>();
         var schemaDatas = new Dictionary<string, List<GoogleSpreadSheetService.MasterSchemaEntity>>();
         var schemaBySheet = new Dictionary<string, Dictionary<string, List<GoogleSpreadSheetService.MasterSchemaEntity>>>();
+        var targetVersion = Version.Parse(parsedArgs.Version);
 
         foreach (var master in masterManifest)
         {
@@ -100,13 +94,13 @@ class Program
 
             var sw1 = new Stopwatch();
             sw1.Start();
-            var schema = await GoogleSpreadSheetService.GetMasterSchemaAsync(credential, master.SpreadSheetId);
+            var schema = await GoogleSpreadSheetService.GetMasterSchemaAsync(credential, master.SpreadSheetId, targetVersion);
             sw1.Stop();
             Console.WriteLine($"  GetMasterSchemaAsync: {sw1.Elapsed.TotalMilliseconds} ms");
 
             var sw2 = new Stopwatch();
             sw2.Start();
-            var rowDatas = await GoogleSpreadSheetService.GetSpreadSheetDataAsync(credential, master.SpreadSheetId, referenceData);
+            var rowDatas = await GoogleSpreadSheetService.GetSpreadSheetDataAsync(credential, master.SpreadSheetId, referenceData, targetVersion);
             sw2.Stop();
             Console.WriteLine($"  GetSpreadSheetDataAsync: {sw2.Elapsed.TotalMilliseconds} ms");
 
@@ -139,11 +133,8 @@ class Program
 
         if(mode.HasFlag(ModeKind.Data))
         {
-            if(parsedArgs.TryGetValue(ArgsKind.ExportType, out var exportType))
-            {
-                Console.WriteLine($"  Export Type: {exportType}");
-                await ExportMasterData(outputDir, sheetDatas, schemaDatas, exportType);
-            }  
+            Console.WriteLine($"  Export Type: {parsedArgs.ExportType}");
+            await ExportMasterData(outputDir, sheetDatas, schemaDatas, parsedArgs.ExportType);
         }
         
         if(mode.HasFlag(ModeKind.Schema))
@@ -180,13 +171,17 @@ class Program
     /// </summary>
     /// <param name="args"></param>
     /// <returns></returns>
-    public static Dictionary<ArgsKind, string> ParseArgs(string[] args)
+    public static ConvertOptions ParseArgs(string[] args)
     {
-        var result = new Dictionary<ArgsKind, string>();
-
-        // デフォルトはdb出力
-        result[ArgsKind.ExportType] = "db";
-        result[ArgsKind.Mode] = "All";
+        var result = new ConvertOptions
+        {
+            // デフォルト値
+            ExportType = "db",
+            Mode = ModeKind.All,
+            Version = "1.0.0",
+            OutputDir = "../../../output",
+            KeyPath = "../../../key.json"
+        };
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -196,7 +191,7 @@ class Program
                 case "-s":
                     if(i + 1 < args.Length)
                     {
-                        result[ArgsKind.SpreadSheetId] = args[i + 1];
+                        result.SpreadSheetId = args[i + 1];
                         i++;
                     }
                     else
@@ -208,13 +203,13 @@ class Program
                 case "-o":
                     if(i + 1 < args.Length)
                     {
-                        result[ArgsKind.OutputDir] = args[i + 1];
+                        result.OutputDir = args[i + 1];
                     }
                     break;
                 case "-k":
                     if(i + 1 < args.Length)
                     {
-                        result[ArgsKind.KeyPath] = args[i + 1];
+                        result.KeyPath = args[i + 1];
                         i++;
                     }
                     else
@@ -226,14 +221,29 @@ class Program
                 case "-t":
                     if(i + 1 < args.Length)
                     {
-                        result[ArgsKind.ExportType] = args[i + 1];
+                        result.ExportType = args[i + 1];
                         i++;
                     }
                     break;
                 case "-m":
                     if(i + 1 < args.Length)
                     {
-                        result[ArgsKind.Mode] = args[i + 1];
+                        if(Enum.TryParse(args[i + 1], out ModeKind modeKind))
+                        {
+                            result.Mode = modeKind;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Error: Invalid mode");
+                            Environment.Exit(1);
+                        }
+                        i++;
+                    }
+                    break;
+                case "-v":
+                    if(i + 1 < args.Length)
+                    {
+                        result.Version = args[i + 1];
                         i++;
                     }
                     break;
@@ -244,6 +254,7 @@ class Program
                     Console.WriteLine("  -k: Key Path");
                     Console.WriteLine("  -t: Export Type (yaml, db, json)");
                     Console.WriteLine("  -m: Mode (Data, Schema, Enum, All)");
+                    Console.WriteLine("  -v: Version (1.0.0)");
                     Console.WriteLine("  -h: Help");
                     Environment.Exit(0);
                     break;
