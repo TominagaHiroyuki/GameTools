@@ -5,6 +5,7 @@
 [Ll]ogs/
 artifacts/
 publish/
+output2/
 
 # Visual Studio / Rider
 .vs/
@@ -25,7 +26,7 @@ project.lock.json
 project.fragment.lock.json
 
 # MasterDataConverter generated outputs
-MasterDataConverter/output/
+MasterDataConverter/output*/
 
 # Google / secrets
 **/key.json

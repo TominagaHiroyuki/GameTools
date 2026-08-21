@@ -21,6 +21,7 @@ class DataConverter
         KeyPath,        // キーのパス
         ExportType,     // 出力タイプ(yaml, db, json)
         Mode,           // モード(Data, Schema, Enum, All)
+        Platform,       // 出力先(Client, Server, All)
         Version,        // バージョン
         Help,           // ヘルプ
     }
@@ -34,6 +35,14 @@ class DataConverter
         All = Data | Schema | Enum,
     }
 
+    [Flags]
+    public enum PlatformKind
+    {
+        Client = 1 << 0,
+        Server = 1 << 1,
+        All = Client | Server,
+    }
+
     public struct ConvertOptions
     {
         public string SpreadSheetId { get; set; }
@@ -41,6 +50,7 @@ class DataConverter
         public string KeyPath { get; set; }
         public string ExportType { get; set; }
         public ModeKind Mode { get; set; }
+        public PlatformKind Platform { get; set; }
         public string Version { get; set; }
     }
 
@@ -70,7 +80,9 @@ class DataConverter
         Console.WriteLine("Start");
 
         var mode = parsedArgs.Mode;
+        var platform = parsedArgs.Platform;
         Console.WriteLine($"  Mode: {mode}");
+        Console.WriteLine($"  Platform: {platform}");
 
         var credential = GoogleAuthService.GetCredential(keyPath, GoogleSpreadSheetService.Scope);
         var masterManifest = await GoogleSpreadSheetService.GetMasterManifestAsync(credential, spreadSheetId);
@@ -133,14 +145,41 @@ class DataConverter
         {
             Console.WriteLine($"  Export Type: {parsedArgs.ExportType}");
             await ExportMasterData(outputDir, sheetDatas, schemaDatas, parsedArgs.ExportType);
+
+            if (platform.HasFlag(PlatformKind.Server))
+            {
+                var serverDir = Path.Combine(outputDir, "server");
+                Directory.CreateDirectory(serverDir);
+                var serverJsonPath = Path.Combine(serverDir, "master.json");
+                var serverJson = new Dictionary<string, List<Dictionary<string, object>>>();
+                foreach (var (sheetName, rows) in sheetDatas)
+                {
+                    var jsonKey = sheetName.Trim().Trim('\'', '"');
+                    serverJson[jsonKey] = rows;
+                }
+
+                await File.WriteAllTextAsync(serverJsonPath, JsonConvert.SerializeObject(serverJson, Formatting.Indented));
+                Console.WriteLine($"  Server JSON File Exported: {Path.GetFullPath(serverJsonPath)}");
+            }
         }
         
         if(mode.HasFlag(ModeKind.Schema))
         {
-            foreach(var (masterName, schemas) in schemaBySheet)
+            if (platform.HasFlag(PlatformKind.Client))
             {
-                MasterDataCodeGenerator.GenerateCode(outputDir, schemas, masterName);
-                Console.WriteLine($"  Code File Exported: {Path.GetFullPath(Path.Combine(outputDir, $"{masterName}.cs"))}");    
+                var clientDir = Path.Combine(outputDir, "client");
+                Directory.CreateDirectory(clientDir);
+                foreach(var (masterName, schemas) in schemaBySheet)
+                {
+                    MasterDataCodeGenerator.GenerateCode(clientDir, schemas, masterName);
+                    Console.WriteLine($"  Code File Exported: {Path.GetFullPath(Path.Combine(outputDir, $"{masterName}.cs"))}");
+                }
+            }
+
+            if (platform.HasFlag(PlatformKind.Server))
+            {
+                var serverDir = Path.Combine(outputDir, "server");
+                MasterDataEfEntityGenerator.Generate(serverDir, schemaBySheet);
             }
         }
         
@@ -176,6 +215,7 @@ class DataConverter
             // デフォルト値
             ExportType = "db",
             Mode = ModeKind.All,
+            Platform = PlatformKind.All,
             Version = "1.0.0",
             OutputDir = "../../../output",
             KeyPath = "../../../key.json"
@@ -238,6 +278,21 @@ class DataConverter
                         i++;
                     }
                     break;
+                case "-p":
+                    if(i + 1 < args.Length)
+                    {
+                        if(Enum.TryParse(args[i + 1], out PlatformKind platformKind))
+                        {
+                            result.Platform = platformKind;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Error: Invalid platform");
+                            Environment.Exit(1);
+                        }
+                        i++;
+                    }
+                    break;
                 case "-v":
                     if(i + 1 < args.Length)
                     {
@@ -246,12 +301,13 @@ class DataConverter
                     }
                     break;
                 case "-h":
-                    Console.WriteLine("Usage: MasterDataConverter -s <spreadsheet_id> -o <output_dir> -m <mode> -k <key_path>");
+                    Console.WriteLine("Usage: MasterDataConverter -s <spreadsheet_id> -o <output_dir> -m <mode> -p <platform> -k <key_path>");
                     Console.WriteLine("  -s: Spreadsheet ID");
                     Console.WriteLine("  -o: Output Directory");
                     Console.WriteLine("  -k: Key Path");
                     Console.WriteLine("  -t: Export Type (yaml, db, json)");
                     Console.WriteLine("  -m: Mode (Data, Schema, Enum, All)");
+                    Console.WriteLine("  -p: Platform (Client, Server, All)");
                     Console.WriteLine("  -v: Version (1.0.0)");
                     Console.WriteLine("  -h: Help");
                     Environment.Exit(0);

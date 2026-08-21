@@ -15,6 +15,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="YamlDotNet" Version="17.1.0" />
     <Compile Remove="output/**/*.cs" />
+    <Compile Remove="output*/**/*.cs" />
   </ItemGroup>
 
 </Project>
